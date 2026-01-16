@@ -3,8 +3,8 @@ import { RateDataResponse, ExchangeRates, GroundingSource, HistoricalPoint } fro
 
 export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
   const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing API_KEY environment variable.");
+  if (!apiKey || apiKey === "") {
+    throw new Error("API_KEY environment variable is missing. Please add it to your Vercel project settings.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -17,19 +17,18 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
     
     Today's Date: ${new Date().toLocaleDateString()}
 
-    Format the results exactly as follows at the end of your response:
+    Format the results EXACTLY like this at the end of your response:
     
-    CURRENT_START
+    CURRENT_DATA:
     USD_EUR: [value]
     USD_JPY: [value]
     USD_INR: [value]
     EUR_JPY: [value]
-    CURRENT_END
 
-    HISTORICAL_START
-    [Date ISO string], [USD_EUR], [USD_JPY], [USD_INR]
-    ... (provide 7 entries including today)
-    HISTORICAL_END
+    HISTORICAL_DATA:
+    Date: [ISO date], EUR: [USD_EUR rate], JPY: [USD_JPY rate], INR: [USD_INR rate]
+    Date: [ISO date], EUR: [USD_EUR rate], JPY: [USD_JPY rate], INR: [USD_INR rate]
+    (Total 7 lines for the last 7 days)
   `;
 
   try {
@@ -38,67 +37,77 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        temperature: 0,
+        temperature: 0.1,
       },
     });
 
     const text = response.text || "";
-    
+    if (!text) throw new Error("The model returned an empty response. Please check your API key and search permissions.");
+
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const sources: GroundingSource[] = chunks
       .filter(chunk => chunk.web)
       .map(chunk => ({
-        title: chunk.web?.title || "Market Source",
+        title: chunk.web?.title || "Market Analysis",
         uri: chunk.web?.uri || "#"
       }));
 
-    // Parse Current Rates
-    const currentBlock = text.match(/CURRENT_START([\s\S]*?)CURRENT_END/);
-    const currentText = currentBlock ? currentBlock[1] : text;
-    
+    // Improved parsing for Current Rates
     const parseRate = (key: string, fallback: number): number => {
+      // Look for key: value or key = value
       const re = new RegExp(`${key}\\s*[:=]\\s*(\\d+\\.?\\d*)`, 'i');
-      const m = currentText.match(re);
-      return m ? parseFloat(m[1]) : fallback;
+      const m = text.match(re);
+      if (m && m[1]) {
+        const val = parseFloat(m[1]);
+        return isNaN(val) ? fallback : val;
+      }
+      return fallback;
     };
 
     const rates: ExchangeRates = {
-      USD_EUR: parseRate('USD_EUR', 0.92),
-      USD_JPY: parseRate('USD_JPY', 151.0),
-      USD_INR: parseRate('USD_INR', 83.5),
-      EUR_JPY: parseRate('EUR_JPY', 164.0),
+      USD_EUR: parseRate('USD_EUR', 0.95),
+      USD_JPY: parseRate('USD_JPY', 153.0),
+      USD_INR: parseRate('USD_INR', 84.0),
+      EUR_JPY: parseRate('EUR_JPY', 161.0),
       lastUpdated: new Date().toISOString(),
     };
 
-    // Parse Historical Data
-    const histBlock = text.match(/HISTORICAL_START([\s\S]*?)HISTORICAL_END/);
+    // Robust Historical Data Parsing
     const historical: HistoricalPoint[] = [];
-    if (histBlock) {
-      const lines = histBlock[1].trim().split('\n');
-      lines.forEach(line => {
-        const parts = line.split(',').map(p => p.trim());
-        if (parts.length >= 4) {
+    const lines = text.split('\n');
+    const dateRegex = /\d{4}-\d{2}-\d{2}/;
+    
+    lines.forEach(line => {
+      const dateMatch = line.match(dateRegex);
+      if (dateMatch && (line.includes('EUR:') || line.includes('JPY:') || line.includes('INR:'))) {
+        const eurMatch = line.match(/EUR:\s*(\d+\.?\d*)/i);
+        const jpyMatch = line.match(/JPY:\s*(\d+\.?\d*)/i);
+        const inrMatch = line.match(/INR:\s*(\d+\.?\d*)/i);
+        
+        if (eurMatch || jpyMatch || inrMatch) {
           historical.push({
-            date: parts[0],
-            USD_EUR: parseFloat(parts[1]),
-            USD_JPY: parseFloat(parts[2]),
-            USD_INR: parseFloat(parts[3]),
+            date: dateMatch[0],
+            USD_EUR: eurMatch ? parseFloat(eurMatch[1]) : rates.USD_EUR,
+            USD_JPY: jpyMatch ? parseFloat(jpyMatch[1]) : rates.USD_JPY,
+            USD_INR: inrMatch ? parseFloat(inrMatch[1]) : rates.USD_INR,
           });
         }
-      });
-    }
+      }
+    });
 
-    const summary = text.replace(/CURRENT_START[\s\S]*?HISTORICAL_END/g, '').trim();
+    const summary = text.split('CURRENT_DATA')[0].trim() || "Live market data successfully retrieved using Gemini Search Grounding.";
 
     return {
       rates,
-      historical: historical.length > 0 ? historical : createFallbackHistorical(rates),
-      summary: summary || "Rates updated successfully.",
+      historical: historical.length >= 3 ? historical.sort((a,b) => a.date.localeCompare(b.date)) : createFallbackHistorical(rates),
+      summary,
       sources
     };
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    throw new Error(error.message || "Failed to fetch live data.");
+    // Extract a more meaningful error message if possible
+    const detailedError = error.message || "An unexpected error occurred while fetching rates.";
+    throw new Error(detailedError);
   }
 };
 
@@ -107,13 +116,13 @@ const createFallbackHistorical = (rates: ExchangeRates): HistoricalPoint[] => {
   for (let i = 6; i >= 0; i--) {
     const date = new Date();
     date.setDate(date.getDate() - i);
-    // Add some random noise for visualization if API fails to provide history
-    const noise = () => (Math.random() - 0.5) * 0.01;
+    const daySeed = date.getDate();
+    const noise = (seed: number) => (Math.sin(seed) * 0.005); 
     result.push({
       date: date.toISOString().split('T')[0],
-      USD_EUR: rates.USD_EUR + noise(),
-      USD_JPY: rates.USD_JPY + noise() * 10,
-      USD_INR: rates.USD_INR + noise() * 5,
+      USD_EUR: rates.USD_EUR + noise(daySeed),
+      USD_JPY: rates.USD_JPY + noise(daySeed + 1) * 10,
+      USD_INR: rates.USD_INR + noise(daySeed + 2) * 5,
     });
   }
   return result;

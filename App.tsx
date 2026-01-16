@@ -21,13 +21,14 @@ const App: React.FC = () => {
 
   const loadRates = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
+    // Don't clear error immediately to prevent flickering if a refresh fails
     try {
       const result = await fetchCurrentRates();
       setData(result);
-    } catch (err) {
-      setError("Failed to fetch market data. Please try again.");
+      setError(null); // Clear error on success
+    } catch (err: any) {
       console.error(err);
+      setError(err.message || "Failed to fetch market data. Please try again later.");
     } finally {
       setIsLoading(false);
     }
@@ -62,18 +63,21 @@ const App: React.FC = () => {
 
         {/* Error State */}
         {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg flex items-center space-x-3">
-            <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-            <p className="text-sm text-red-700 font-medium">{error}</p>
-            <button onClick={loadRates} className="text-red-700 font-bold underline ml-auto">Retry</button>
+          <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg flex flex-col space-y-2 animate-in slide-in-from-top duration-300">
+            <div className="flex items-center space-x-3">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm text-red-700 font-semibold">Service Error</p>
+              <button onClick={loadRates} className="text-red-700 text-xs font-bold underline ml-auto bg-red-100 px-2 py-1 rounded hover:bg-red-200 transition-colors">Retry Now</button>
+            </div>
+            <p className="text-xs text-red-600 pl-8">{error}</p>
           </div>
         )}
 
         {/* Main Section */}
-        {data && (
-          <div className="space-y-8 animate-in fade-in duration-700">
+        {data ? (
+          <div className="space-y-8 animate-in fade-in zoom-in-95 duration-700">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
               <CurrencyConverter 
                 rates={data.rates} 
@@ -100,17 +104,27 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
-        )}
-
-        {/* Skeleton Loader */}
-        {isLoading && !data && (
-          <div className="space-y-8 animate-pulse">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="bg-gray-200 h-96 rounded-3xl"></div>
-              <div className="bg-gray-200 h-96 rounded-3xl"></div>
+        ) : (
+          isLoading && (
+            <div className="space-y-8 animate-pulse">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-white rounded-3xl h-96 shadow-sm border border-slate-100 p-8 flex flex-col space-y-4">
+                  <div className="h-8 bg-slate-200 rounded w-1/2"></div>
+                  <div className="h-12 bg-slate-100 rounded w-full"></div>
+                  <div className="h-12 bg-slate-100 rounded w-full mt-auto"></div>
+                </div>
+                <div className="bg-white rounded-3xl h-96 shadow-sm border border-slate-100 p-8">
+                  <div className="h-8 bg-slate-200 rounded w-1/3 mb-6"></div>
+                  <div className="h-full bg-slate-50 rounded w-full"></div>
+                </div>
+              </div>
+              <div className="bg-white rounded-3xl h-48 shadow-sm border border-slate-100 p-8">
+                <div className="h-6 bg-slate-200 rounded w-1/4 mb-4"></div>
+                <div className="h-4 bg-slate-100 rounded w-full mb-2"></div>
+                <div className="h-4 bg-slate-100 rounded w-full"></div>
+              </div>
             </div>
-            <div className="bg-gray-200 h-48 rounded-3xl"></div>
-          </div>
+          )
         )}
 
         {/* Footer */}
