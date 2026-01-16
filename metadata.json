@@ -1,5 +1,5 @@
 {
-  "name": "Copy of CURRENCY CONVERTER",
+  "name": "CONVERTER",
   "description": "A premium real-time currency converter for USD, EUR, and JPY using Gemini Search Grounding for the latest market rates.",
   "requestFramePermissions": []
 }
