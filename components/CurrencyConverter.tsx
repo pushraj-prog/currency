@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { CurrencyCode, ExchangeRates } from '../types';
 
@@ -6,9 +5,10 @@ interface Props {
   rates: ExchangeRates;
   onRefresh: () => void;
   isLoading: boolean;
+  onCurrencyChange: (from: CurrencyCode, to: CurrencyCode) => void;
 }
 
-const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => {
+const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading, onCurrencyChange }) => {
   const [amount, setAmount] = useState<string>('1');
   const [fromCurrency, setFromCurrency] = useState<CurrencyCode>('USD');
   const [toCurrency, setToCurrency] = useState<CurrencyCode>('INR');
@@ -18,21 +18,14 @@ const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => 
   const [manualRate, setManualRate] = useState<string>('');
   const [overriddenRate, setOverriddenRate] = useState<{from: string, to: string, rate: number} | null>(null);
 
-  // Dynamically derive available currencies from the rates object keys
-  const availableCurrencies = useMemo(() => {
-    const currencies = new Set<CurrencyCode>();
-    (Object.keys(rates) as Array<keyof ExchangeRates>).forEach(key => {
-      if (key.includes('_')) {
-        const parts = key.split('_') as CurrencyCode[];
-        parts.forEach(p => {
-          if (p) currencies.add(p);
-        });
-      }
-    });
-    return Array.from(currencies);
-  }, [rates]);
+  useEffect(() => {
+    onCurrencyChange(fromCurrency, toCurrency);
+  }, [fromCurrency, toCurrency, onCurrencyChange]);
 
-  // Reset override when currencies change unless we are in the middle of editing
+  const availableCurrencies = useMemo(() => {
+    return ['USD', 'EUR', 'JPY', 'INR'] as CurrencyCode[];
+  }, []);
+
   useEffect(() => {
     if (!isEditingRate) {
       setOverriddenRate(null);
@@ -41,20 +34,15 @@ const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => 
 
   const convert = (val: number, from: CurrencyCode, to: CurrencyCode): number => {
     if (from === to) return val;
-    
-    // Check if we have a manual override for this specific pair
     if (overriddenRate && overriddenRate.from === from && overriddenRate.to === to) {
       return val * overriddenRate.rate;
     }
 
-    // Standard conversion logic using Gemini rates
-    // Convert all to USD first as base
     let usdAmount = val;
     if (from === 'EUR') usdAmount = val / rates.USD_EUR;
     if (from === 'JPY') usdAmount = val / rates.USD_JPY;
     if (from === 'INR') usdAmount = val / rates.USD_INR;
 
-    // Convert from USD to target
     if (to === 'USD') return usdAmount;
     if (to === 'EUR') return usdAmount * rates.USD_EUR;
     if (to === 'JPY') return usdAmount * rates.USD_JPY;
@@ -74,9 +62,10 @@ const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => 
   }, [fromCurrency, toCurrency, rates]);
 
   const handleSwap = () => {
+    const prevFrom = fromCurrency;
     setFromCurrency(toCurrency);
-    setToCurrency(fromCurrency);
-    setOverriddenRate(null); // Reset override on swap for simplicity
+    setToCurrency(prevFrom);
+    setOverriddenRate(null);
   };
 
   const handleStartEdit = () => {
@@ -123,12 +112,9 @@ const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => 
                 onChange={(e) => setFromCurrency(e.target.value as CurrencyCode)}
                 className="bg-transparent font-bold text-gray-700 cursor-pointer focus:outline-none"
               >
-                {availableCurrencies
-                  .filter(curr => curr !== toCurrency)
-                  .map(curr => (
-                    <option key={curr} value={curr}>{curr}</option>
-                  ))
-                }
+                {availableCurrencies.map(curr => (
+                  <option key={curr} value={curr}>{curr}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -155,12 +141,9 @@ const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => 
                 onChange={(e) => setToCurrency(e.target.value as CurrencyCode)}
                 className="bg-transparent font-bold text-white cursor-pointer focus:outline-none"
               >
-                {availableCurrencies
-                  .filter(curr => curr !== fromCurrency)
-                  .map(curr => (
-                    <option key={curr} value={curr} className="text-gray-800">{curr}</option>
-                  ))
-                }
+                {availableCurrencies.map(curr => (
+                  <option key={curr} value={curr} className="text-gray-800">{curr}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -168,7 +151,6 @@ const CurrencyConverter: React.FC<Props> = ({ rates, onRefresh, isLoading }) => 
       </div>
 
       <div className="mt-8 flex flex-col space-y-4">
-        {/* Manual Rate Edit Area */}
         <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
           {isEditingRate ? (
             <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4">
