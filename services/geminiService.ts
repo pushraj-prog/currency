@@ -3,8 +3,9 @@ import { GoogleGenAI } from "@google/genai";
 import { RateDataResponse, ExchangeRates, GroundingSource, HistoricalPoint } from "../types";
 
 export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
-  // Use a fresh instance to ensure the most up-to-date key is used
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Always use a fresh instance right before making an API call to ensure it always uses the most up-to-date API key.
+  // Use the API key exclusively from process.env.API_KEY.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
     Find the CURRENT real-time mid-market exchange rates and HISTORICAL rates for the last 7 days for these pairs:
