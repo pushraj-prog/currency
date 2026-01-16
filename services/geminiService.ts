@@ -1,13 +1,10 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { RateDataResponse, ExchangeRates, GroundingSource, HistoricalPoint } from "../types";
 
 export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey === "") {
-    throw new Error("API_KEY environment variable is missing. Please add it to your Vercel project settings.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  // Use a fresh instance to ensure the most up-to-date key is used
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
   const prompt = `
     Find the CURRENT real-time mid-market exchange rates and HISTORICAL rates for the last 7 days for these pairs:
@@ -42,7 +39,7 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
     });
 
     const text = response.text || "";
-    if (!text) throw new Error("The model returned an empty response. Please check your API key and search permissions.");
+    if (!text) throw new Error("The model returned an empty response.");
 
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const sources: GroundingSource[] = chunks
@@ -54,7 +51,6 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
 
     // Improved parsing for Current Rates
     const parseRate = (key: string, fallback: number): number => {
-      // Look for key: value or key = value
       const re = new RegExp(`${key}\\s*[:=]\\s*(\\d+\\.?\\d*)`, 'i');
       const m = text.match(re);
       if (m && m[1]) {
@@ -105,9 +101,7 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
     };
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    // Extract a more meaningful error message if possible
-    const detailedError = error.message || "An unexpected error occurred while fetching rates.";
-    throw new Error(detailedError);
+    throw error;
   }
 };
 
