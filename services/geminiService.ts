@@ -3,25 +3,33 @@ import { GoogleGenAI } from "@google/genai";
 import { RateDataResponse, ExchangeRates, GroundingSource } from "../types";
 
 export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
+  if (!process.env.API_KEY) {
+    throw new Error("API_KEY is missing from environment variables.");
+  }
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Explicitly requesting the direct rates in a clear format
   const prompt = `
-    Provide the current exchange rates for the following pairs:
-    - Direct USD to EUR
-    - Direct USD to JPY
-    - Direct USD to INR
-    - Direct EUR to JPY
+    Find and provide the CURRENT mid-market exchange rates for the following pairs:
+    - USD to EUR
+    - USD to JPY
+    - USD to INR
+    - EUR to JPY
     
-    Please return them in a clear list format like "USD to EUR: [value]".
-    Also provide a 2-sentence market summary regarding these specific currency pairs.
+    CRITICAL: At the end of your response, provide the data in this EXACT format for parsing:
+    RAW_DATA_START
+    USD_EUR: [value]
+    USD_JPY: [value]
+    USD_INR: [value]
+    EUR_JPY: [value]
+    RAW_DATA_END
     
     Current date: ${new Date().toLocaleDateString()}
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-pro-preview",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -29,8 +37,9 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
     });
 
     const text = response.text || "";
+    console.log("Gemini Response Text:", text);
+
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    
     const sources: GroundingSource[] = chunks
       .filter(chunk => chunk.web)
       .map(chunk => ({
@@ -39,49 +48,47 @@ export const fetchCurrentRates = async (): Promise<RateDataResponse> => {
       }));
 
     /**
-     * Enhanced extraction logic that tries multiple common patterns
-     * to find the rate for a pair of currencies.
+     * Enhanced extraction logic
      */
-    const extractRate = (from: string, to: string, defaultVal: number): number => {
+    const extractFromRaw = (key: string, defaultVal: number): number => {
+      // Try to find the specific tag first
+      const rawBlockMatch = text.match(/RAW_DATA_START([\s\S]*?)RAW_DATA_END/);
+      const searchTarget = rawBlockMatch ? rawBlockMatch[1] : text;
+
       const patterns = [
-        // Pattern: "USD to EUR: 0.92" or "USD to EUR is 0.92"
-        `${from} to ${to}[:\\s\\w]+(\\d+\\.?\\d*)`,
-        // Pattern: "USD/EUR: 0.92"
-        `${from}/${to}[:\\s]+(\\d+\\.?\\d*)`,
-        // Pattern: "1 USD = 0.92 EUR"
-        `1\\s*${from}\\s*=\\s*(\\d+\\.?\\d*)\\s*${to}`,
-        // Pattern: "USD: 0.92 EUR"
-        `${from}\\s*[:=]\\s*(\\d+\\.?\\d*)\\s*${to}`
+        new RegExp(`${key}\\s*[:=]\\s*(\\d+\\.?\\d*)`, 'i'),
+        new RegExp(`${key.replace('_', ' to ')}\\s*[:=]?\\s*(\\d+\\.?\\d*)`, 'i'),
+        new RegExp(`${key.replace('_', '/')}\\s*[:=]?\\s*(\\d+\\.?\\d*)`, 'i'),
+        new RegExp(`1\\s*${key.split('_')[0]}\\s*=\\s*(\\d+\\.?\\d*)`, 'i')
       ];
-      
-      for (const p of patterns) {
-        const regex = new RegExp(p, 'i');
-        const match = text.match(regex);
+
+      for (const pattern of patterns) {
+        const match = searchTarget.match(pattern);
         if (match && match[1]) {
           const val = parseFloat(match[1]);
-          if (!isNaN(val)) return val;
+          if (!isNaN(val) && val > 0) return val;
         }
       }
       
-      console.warn(`Could not extract rate for ${from} to ${to}, using default: ${defaultVal}`);
+      console.warn(`Extraction failed for ${key}, using default: ${defaultVal}`);
       return defaultVal;
     };
 
     const rates: ExchangeRates = {
-      USD_EUR: extractRate('USD', 'EUR', 0.92),
-      USD_JPY: extractRate('USD', 'JPY', 150.5),
-      USD_INR: extractRate('USD', 'INR', 83.3),
-      EUR_JPY: extractRate('EUR', 'JPY', 163.2),
+      USD_EUR: extractFromRaw('USD_EUR', 0.92),
+      USD_JPY: extractFromRaw('USD_JPY', 150.5),
+      USD_INR: extractFromRaw('USD_INR', 83.3),
+      EUR_JPY: extractFromRaw('EUR_JPY', 163.2),
       lastUpdated: new Date().toISOString(),
     };
 
     return {
       rates,
-      summary: text,
+      summary: text.split('RAW_DATA_START')[0].trim(),
       sources
     };
   } catch (error) {
-    console.error("Error fetching rates from Gemini:", error);
+    console.error("Gemini Service Error:", error);
     throw error;
   }
 };
